@@ -29,9 +29,9 @@
     
     <div class="section">
         <h3>Step 1: Paste Data</h3>
-        <p style="font-size: 13px; margin-top: -5px;">Copy rows directly from Excel (5 columns) <br><b>OR</b> paste raw, messy text directly from the PDF.</p>
+        <p style="font-size: 13px; margin-top: -5px;">Paste rows directly from Excel <b>OR</b> raw text from PDF Gradesheets. The system will auto-detect the format.</p>
         
-        <textarea id="pasteArea" placeholder="Paste Excel rows here... OR paste the raw text from your PDF Gradesheet directly..."></textarea>
+        <textarea id="pasteArea" placeholder="Paste data here..."></textarea>
         
         <button class="btn-secondary" onclick="processPastedData()">Load Pasted Data</button>
         <button class="btn-danger" onclick="clearDatabase()">Clear System Memory</button>
@@ -41,7 +41,7 @@
     
     <div class="section">
         <h3>Step 2: Search Student</h3>
-        <input type="text" id="searchQuery" placeholder="Enter partial or full name (e.g., Alferez)">
+        <input type="text" id="searchQuery" placeholder="Enter partial or full name (e.g., Alicaba)">
         <button class="btn-primary" onclick="searchGrades()">View Grades</button>
     </div>
     
@@ -53,7 +53,7 @@
 
         function processPastedData() {
             const textArea = document.getElementById('pasteArea');
-            let rawText = textArea.value.trim();
+            const rawText = textArea.value.trim();
             const statusDiv = document.getElementById('status');
 
             if (!rawText) {
@@ -62,20 +62,41 @@
             }
 
             let addedCount = 0;
-            let errorCount = 0;
+            let pdfTextBuffer = "";
 
-            // Pre-cleaning: Fix merged grades/names like "1.50 AAUGUSTO" -> "1.50 A AUGUSTO"
-            rawText = rawText.replace(/([1-5](?:\.\d{1,2})?)\s*([A-F][\+\-]?|INC|DRP)([A-ZÑ])/g, "$1 $2 $3");
+            // 1. Process Line by Line to handle Excel formats cleanly
+            const rawLines = rawText.split('\n');
+            
+            rawLines.forEach(line => {
+                if (!line.trim()) return;
 
-            // DETECT FORMAT: If it contains tabs, treat it as standard Excel Paste
-            if (rawText.includes('\t')) {
-                const rows = rawText.split('\n');
+                const columns = line.split('\t').map(c => c.trim());
                 
-                rows.forEach((row, index) => {
-                    if (row.trim() === '') return;
-                    const columns = row.split('\t').map(col => col.trim());
+                // If it contains 4+ tabs, it is definitely copied from an Excel Spreadsheet
+                if (columns.length >= 5 && line.includes('\t')) {
+                    
+                    // Skip header rows
+                    if (line.toLowerCase().includes('student name')) return;
 
-                    if (columns.length >= 5) {
+                    // Intelligently find the Name column (names usually have a comma)
+                    let nameIdx = columns.findIndex(c => c.includes(',') && /[a-zA-Z]/.test(c));
+                    if (nameIdx === -1) nameIdx = 0; // Fallback to first column
+
+                    if (columns.length >= 8) {
+                        // NEW EXCEL FORMAT (10-11 columns)
+                        let numGrade = columns[columns.length - 2];
+                        let letGrade = columns[columns.length - 1];
+                        
+                        gradeData.push({
+                            studentName: columns[nameIdx],
+                            subjectCode: "N/A", 
+                            subjectTitle: "N/A",
+                            teacher: "N/A",
+                            grade: `${numGrade} (${letGrade})`
+                        });
+                        addedCount++;
+                    } else {
+                        // OLD EXCEL FORMAT (5 columns)
                         gradeData.push({
                             studentName: columns[0],
                             subjectCode: columns[1],
@@ -84,55 +105,49 @@
                             grade: columns[4]
                         });
                         addedCount++;
-                    } else {
-                        errorCount++;
                     }
-                });
+                } else {
+                    // It's not an Excel row, add to PDF buffer
+                    pdfTextBuffer += line + "\n";
+                }
+            });
 
-            } else {
-                // PDF PLAIN TEXT PARSER
+            // 2. Process whatever is left in the PDF Text Buffer
+            if (pdfTextBuffer.trim() !== "") {
+                
+                // Extract Metadata from PDF
                 let subjectCode = "N/A";
                 let subjectTitle = "N/A";
                 let teacher = "N/A";
 
-                // 1. Extract Headers Adaptively
-                const codeMatch = rawText.match(/(?:Subject Code\s+)?([A-Z0-9\-]+)?\s*Section\s+([A-Z0-9\-]+)/i);
-                if (codeMatch) {
-                    let codePart = codeMatch[1] ? codeMatch[1].trim() + " " : "";
-                    subjectCode = codePart + "(" + codeMatch[2].trim() + ")";
-                }
+                const codeMatch = pdfTextBuffer.match(/(?:Subject Code\s+)?([A-Z0-9\-]+)?\s*Section\s+([A-Z0-9\-]+)/i);
+                if (codeMatch) subjectCode = (codeMatch[1] ? codeMatch[1].trim() + " " : "") + "(" + codeMatch[2].trim() + ")";
 
-                const titleMatch = rawText.match(/(?:Subject Title\s+)?(.+?)\s+Day\s+[A-Za-z]/i);
-                if (titleMatch) {
-                    subjectTitle = titleMatch[1].trim();
-                }
+                const titleMatch = pdfTextBuffer.match(/(?:Subject Title\s+)?(.+?)\s+Day\s+[A-Za-z]/i);
+                if (titleMatch) subjectTitle = titleMatch[1].trim();
 
-                const teacherMatch = rawText.match(/Instructor\s+(.+?)(?:\s+\||Room|\n|$)/i);
+                const teacherMatch = pdfTextBuffer.match(/Instructor\s+(.+?)(?:\s+\||Room|\n|$)/i);
                 if (teacherMatch) {
                     teacher = teacherMatch[1].trim();
                 } else {
-                    // Fallback if "Instructor" is missing (e.g., WINSLIE P. DADA | 24-512 Room SCLAB)
-                    const teacherFallback = rawText.match(/([A-Z\.\sÑñ]+)\s+\|\s+.*?Room/i);
+                    const teacherFallback = pdfTextBuffer.match(/([A-Z\.\sÑñ]+)\s+\|\s+.*?Room/i);
                     if (teacherFallback) teacher = teacherFallback[1].trim();
                 }
 
-                // 2. Extract Students robustly
-                // Rules: Last Name, First Name (No numbers allowed) -> Sequence of middle grades/status -> Final Numeric Grade -> Final Letter Grade
-                const studentRegex = /([^0-9,\n]{2,40}?,\s*[^0-9\n]{2,40}?)\s+((?:[\d\.]+\s*[a-zA-Z]*\s*)+)\s+([1-5](?:\.\d{1,2})?)\s+([A-F][\+\-]?|INC|DRP)/g;
+                // Pre-clean: Fix merged grades from PDF copy-pastes (e.g., "1.50 AVILLA" -> "1.50 A \n VILLA")
+                let cleanText = pdfTextBuffer.replace(/([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s*([A-F][\+\-]?|INC|DRP|IC)\s*([A-ZÑÃ])/g, "$1 $2\n$3");
+                
+                // Remove header keywords that might merge into names
+                cleanText = cleanText.replace(/GRADE|FINALGRD|STUDENT|NAME|LEC|LAB|Status|TotStud/gi, ' ');
+
+                // Robust PDF Regex: Looks for "Lastname, Firstname ... Numbers/Status ... Final Grade Letter"
+                const studentRegex = /([A-Za-zÑñÃ\-\.\'‘ ]{2,40}?,\s*[A-Za-zÑñÃ\-\.\'‘ ]{2,40}?)\s+(?:(?:[\d\.]+|CO|IC|INC|DRP|[\w\+]+)\s+)+?([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s+([A-F][\+\-]?|INC|DRP|IC)(?=\s|$|\n)/gi;
 
                 let match;
-                let foundAny = false;
-
-                while ((match = studentRegex.exec(rawText)) !== null) {
-                    foundAny = true;
-                    
+                while ((match = studentRegex.exec(cleanText)) !== null) {
                     let studentName = match[1].trim().replace(/\s+/g, ' '); 
-                    
-                    // Filter out header words that accidentally bleed in
-                    studentName = studentName.replace(/GRADE|FINALGRD|STUDENT|NAME|LEC|LAB|Status|TotStud/gi, '').trim();
-
-                    const finalNumericGrade = match[3]; 
-                    const letterGrade = match[4];      
+                    let finalNumericGrade = match[2]; 
+                    let letterGrade = match[3];      
 
                     if (studentName.length > 2) {
                         gradeData.push({
@@ -145,23 +160,14 @@
                         addedCount++;
                     }
                 }
-
-                if (!foundAny) {
-                     statusDiv.innerHTML = '<span class="error">Failed to load. Could not detect valid student rows or headers from the text.</span>';
-                     return;
-                }
             }
 
             // Provide user feedback
             if (addedCount > 0) {
-                let msg = `<span class="success">Success! Added ${addedCount} new student records. Total in memory: ${gradeData.length}.</span>`;
-                if (errorCount > 0) {
-                    msg += `<br><span class="error" style="font-size: 12px;">Note: Skipped ${errorCount} invalid Excel rows.</span>`;
-                }
-                statusDiv.innerHTML = msg;
+                statusDiv.innerHTML = `<span class="success">Success! Added ${addedCount} student records. Total in memory: ${gradeData.length}.</span>`;
                 textArea.value = ''; // Clear the box
             } else {
-                statusDiv.innerHTML = '<span class="error">Failed to load data. Ensure the format is correct.</span>';
+                statusDiv.innerHTML = '<span class="error">Failed to load data. Could not detect valid Excel rows or PDF records.</span>';
             }
         }
 
