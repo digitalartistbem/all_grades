@@ -65,10 +65,10 @@
 
             let addedCount = 0;
 
-            // --- GLOBAL UN-SQUASHER ---
-            // Fixes issues where the copy-paste glues a grade directly into the next student's name on the same line.
-            // Example: "1.5 AVILLA,RAJIEMAE" or "1.75 B+CORTES" -> Forces a clean line break before the name.
-            rawText = rawText.replace(/([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s*([A-F][\+\-]?|INC|DRP|IC)\s*(?=[A-ZÑ])/g, "$1 $2\n");
+            // --- SMART UN-SQUASHER ---
+            // Only splits if it detects Grade + Letter perfectly followed by a Last Name AND a comma.
+            // Example: "1.5 ACORTES," works. "84.44 CO" is safely ignored because "O" has no comma.
+            rawText = rawText.replace(/(^|\s)([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s*([A-F][\+\-]?|INC|DRP|IC)\s*(?=[A-ZÑ\-\.\'‘]+\s*,)/gi, "$1$2 $3\n");
 
             const rawLines = rawText.split('\n');
 
@@ -83,8 +83,11 @@
                 let codeMatch = line.match(/(?:Subject Code\s+)?([A-Z0-9\-]+)?\s*Section\s+([A-Z0-9\-]+)/i);
                 if (codeMatch) subjectCode = (codeMatch[1] ? codeMatch[1].trim() + " " : "") + "(" + codeMatch[2].trim() + ")";
 
-                let titleMatch = line.match(/(?:Subject Title\s+)?(.+?)\s+Day\s+[A-Za-z]/i);
-                if (titleMatch) subjectTitle = titleMatch[1].trim();
+                // Fixed: Captures everything from the start of the line or 'Subject Title' until 'Day'
+                let titleMatch = line.match(/(?:Subject Title\s+|^)(.+?)\s+Day\s+/i);
+                if (titleMatch && !titleMatch[1].includes("Subject Code") && titleMatch[1].length > 5) {
+                    subjectTitle = titleMatch[1].trim();
+                }
 
                 let teacherMatch = line.match(/Instructor\s+(.+?)(?:\s+\||Room|$)/i);
                 if (teacherMatch) teacher = teacherMatch[1].trim();
@@ -127,8 +130,8 @@
                 if (line.includes(',')) {
                     // Match Name at start (Last, First)
                     const nameMatch = line.match(/^([A-Za-zÑñÃ\-\.\'‘ ]+,\s*[A-Za-zÑñÃ\-\.\'‘ ]+)/);
-                    // Match Grades at end (Numeric Letter)
-                    const gradeMatch = line.match(/([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s+([A-F][\+\-]?|INC|DRP|IC)$/i);
+                    // Match Grades at end (Numeric Letter). Added (?:^|\s) to prevent partial matching inside numbers.
+                    const gradeMatch = line.match(/(?:^|\s)([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s+([A-F][\+\-]?|INC|DRP|IC)$/i);
 
                     if (nameMatch && gradeMatch) {
                         let studentName = nameMatch[1].trim();
