@@ -53,7 +53,7 @@
     
     <div class="section">
         <h3>Step 2: Search Student <span id="memoryCount" class="count-badge">0 in memory</span></h3>
-        <input type="text" id="searchQuery" placeholder="Enter name OR leave blank to see all students">
+        <input type="text" id="searchQuery" placeholder="Enter name (e.g., Gonzales Charmaine)">
         <button class="btn-primary" onclick="searchGrades()">View Grades</button>
     </div>
     
@@ -74,7 +74,6 @@
             const statusDiv = document.getElementById('status');
             statusDiv.innerHTML = `<span style="color:#0056b3;">Scanning folder... Found ${files.length} items.</span>`;
             
-            // Filter out unsupported files (images, word docs, etc.)
             const validFiles = Array.from(files).filter(f => f.name.match(/\.(xlsx|xls|pdf)$/i) && !f.name.startsWith('~'));
             totalFilesToProcess = validFiles.length;
             filesProcessed = 0;
@@ -101,10 +100,9 @@
                 statusDiv.innerHTML = `<span style="color:#0056b3;">Processing ${filesProcessed} / ${totalFilesToProcess} files...</span>`;
             }
 
-            // Processing Complete
             document.getElementById('memoryCount').innerText = `${gradeData.length} in memory`;
             statusDiv.innerHTML = `<span class="success">✅ Success! Extracted ${gradeData.length} students from ${totalFilesToProcess} files.</span>`;
-            event.target.value = ''; // Reset input
+            event.target.value = ''; 
         }
 
         // --- EXCEL PARSER ---
@@ -116,11 +114,7 @@
                         const data = new Uint8Array(e.target.result);
                         const workbook = XLSX.read(data, {type: 'array'});
                         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                        
-                        // Convert sheet to a 2D array of strings
                         const rows = XLSX.utils.sheet_to_json(firstSheet, {header: 1, raw: false});
-                        
-                        // Convert the 2D array into tab-separated text so we can re-use our robust logic
                         const textLines = rows.map(row => row.join('\t')).join('\n');
                         extractDataFromText(textLines, true);
                         resolve();
@@ -143,11 +137,10 @@
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
                 
-                // Construct text while respecting layout and line breaks
                 let lastY = -1;
                 for (let item of textContent.items) {
                     if (lastY !== item.transform[5] && lastY !== -1) {
-                        fullText += "\n"; // Create new line if Y coordinate changes
+                        fullText += "\n"; 
                     }
                     fullText += item.str + " ";
                     lastY = item.transform[5];
@@ -157,9 +150,16 @@
             extractDataFromText(fullText, false);
         }
 
-        // --- CORE EXTRACTOR (Our Trusted Logic) ---
+        // --- NAME CLEANER HELPER ---
+        // Fixes spacing issues (e.g. "Gonzales,Charmaine" -> "Gonzales, Charmaine")
+        function formatName(rawName) {
+            let cleanName = rawName.replace(/\s+/g, ' ').trim();
+            cleanName = cleanName.replace(/,([^\s])/g, ', $1'); // Ensure space after comma
+            return cleanName;
+        }
+
+        // --- CORE EXTRACTOR ---
         function extractDataFromText(rawText, isExcel) {
-            // Un-Squasher
             rawText = rawText.replace(/(^|\s)([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s*([A-F][\+\-]?|INC|DRP|IC)\s*(?=[A-ZÑ\-\.\'‘]+\s*,)/gi, "$1$2 $3\n");
             const rawLines = rawText.split('\n');
 
@@ -167,7 +167,6 @@
             let subjectTitle = "N/A";
             let teacher = "N/A";
 
-            // Headers
             for (let i = 0; i < Math.min(30, rawLines.length); i++) {
                 let line = rawLines[i];
                 let codeMatch = line.match(/(?:Subject Code\s+)?([A-Z0-9\-]+)?\s*Section\s+([A-Z0-9\-]+)/i);
@@ -184,7 +183,6 @@
                 }
             }
 
-            // Students
             rawLines.forEach(line => {
                 line = line.trim();
                 if (!line) return;
@@ -196,7 +194,7 @@
                     let nameIdx = cols.findIndex(c => c.includes(',') && /[a-zA-Z]/.test(c));
                     if (nameIdx === -1) nameIdx = 0; 
                     
-                    let studentName = cols[nameIdx];
+                    let studentName = formatName(cols[nameIdx]);
                     let letGrade = cols[cols.length - 1]; 
                     let numGrade = cols[cols.length - 2]; 
                     
@@ -211,7 +209,7 @@
                     const gradeMatch = line.match(/(?:^|\s)([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s+([A-F][\+\-]?|INC|DRP|IC)$/i);
 
                     if (nameMatch && gradeMatch) {
-                        let studentName = nameMatch[1].trim();
+                        let studentName = formatName(nameMatch[1].trim());
                         if (!studentName.toLowerCase().includes('student name')) {
                             gradeData.push({ studentName, subjectCode, subjectTitle, teacher, grade: `${gradeMatch[1]} (${gradeMatch[2]})` });
                         }
@@ -220,7 +218,7 @@
             });
         }
 
-        // --- UI LOGIC ---
+        // --- SMART SEARCH LOGIC ---
         function searchGrades() {
             const query = document.getElementById('searchQuery').value.trim().toLowerCase();
             const resultsDiv = document.getElementById('results');
@@ -231,7 +229,20 @@
                 return;
             }
 
-            let studentGrades = query ? gradeData.filter(s => s.studentName && s.studentName.toLowerCase().includes(query)) : gradeData;
+            let studentGrades = gradeData;
+
+            if (query) {
+                // Split search into individual keywords (ignoring commas and spaces)
+                const searchTerms = query.replace(/,/g, ' ').split(/\s+/).filter(term => term !== "");
+                
+                studentGrades = gradeData.filter(student => {
+                    if (!student.studentName) return false;
+                    const nameLower = student.studentName.toLowerCase();
+                    
+                    // The student name MUST contain EVERY keyword you typed
+                    return searchTerms.every(term => nameLower.includes(term));
+                });
+            }
 
             if (studentGrades.length === 0) {
                 resultsDiv.innerHTML = '<p class="error">No matching records found.</p>';
