@@ -3,78 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Grade Portal</title>
+    <title>Dynamic Student Grade Portal</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
-        .search-box { margin-bottom: 20px; padding: 15px; background: #f4f4f4; border-radius: 5px; }
-        input { padding: 10px; width: calc(50% - 15px); margin-bottom: 10px; }
-        button { padding: 10px 20px; background: #0056b3; color: white; border: none; cursor: pointer; border-radius: 3px; }
-        button:hover { background: #004494; }
-        .result-card { border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #0056b3; }
-        .error { color: red; font-weight: bold; }
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.5; }
+        .section { margin-bottom: 25px; padding: 15px; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; }
+        h3 { margin-top: 0; color: #0056b3; }
+        input[type="text"] { padding: 10px; width: calc(50% - 15px); margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="file"] { margin-bottom: 10px; display: block; }
+        button { padding: 10px 20px; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .btn-primary { background: #0056b3; width: 100%; }
+        .btn-primary:hover { background: #004494; }
+        .btn-secondary { background: #28a745; }
+        .btn-secondary:hover { background: #218838; }
+        .btn-danger { background: #dc3545; padding: 5px 10px; font-size: 12px; }
+        .status-msg { font-weight: bold; margin-bottom: 15px; color: #666; padding: 10px; background: #e2e3e5; border-radius: 4px; }
+        .result-card { border: 1px solid #dee2e6; padding: 15px; margin-bottom: 12px; border-radius: 6px; border-left: 5px solid #0056b3; background: #fff; }
+        .result-card p { margin: 6px 0; }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
     </style>
 </head>
 <body>
 
-    <h2>Student Grade Search</h2>
-    
-    <div class="search-box">
-        <input type="text" id="firstName" placeholder="First Name (e.g., Juan)">
-        <input type="text" id="lastName" placeholder="Last Name (e.g., Dela Cruz)">
-        <button onclick="searchGrades()">View Grades</button>
+    <h2>Grade Release Dashboard</h2>
+    <p style="font-size: 14px; color: #666;"><em>Note: Uploaded data is processed strictly in your browser session. Refreshing the page clears all records.</em></p>
+
+    <div class="section">
+        <h3>Step 1: Import Grade Files</h3>
+        <p style="font-size: 13px; margin-top: -5px;">You can select multiple converted JSON files at once.</p>
+        <input type="file" id="fileInput" multiple accept=".json">
+        <button class="btn-secondary" onclick="importJSONFiles()">Load Selected Files</button>
+        <button class="btn-danger" onclick="clearDatabase()" style="float: right;">Clear All Loaded Data</button>
     </div>
 
+    <div id="status" class="status-msg">No data loaded. Please import your JSON files above.</div>
+    
+    <div class="section">
+        <h3>Step 2: Search Student</h3>
+        <input type="text" id="firstName" placeholder="First Name">
+        <input type="text" id="lastName" placeholder="Last Name">
+        <button class="btn-primary" onclick="searchGrades()">View Grades</button>
+    </div>
+    
     <div id="results"></div>
 
     <script>
-        // We will store the data here once it loads
+        // Global master array to hold data merged from all uploaded files
         let gradeData = [];
 
-        // Fetch the JSON file when the page loads
-        fetch('grades.json')
-            .then(response => response.json())
-            .then(data => {
-                gradeData = data;
-            })
-            .catch(error => {
-                console.error('Error loading grades:', error);
-                document.getElementById('results').innerHTML = '<p class="error">System Error: Could not load grade database.</p>';
-            });
+        async function importJSONFiles() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            const statusDiv = document.getElementById('status');
+
+            if (files.length === 0) {
+                statusDiv.innerHTML = '<span class="error">Error: Please select at least one JSON file.</span>';
+                return;
+            }
+
+            let validFilesCount = 0;
+            let totalNewRecords = 0;
+
+            // Loop through all selected files asynchronously
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                try {
+                    const text = await file.text(); // Read file content
+                    const parsedJson = JSON.parse(text); // Convert string to JS Object/Array
+
+                    if (Array.isArray(parsedJson)) {
+                        // Merge the array records into our master list
+                        gradeData = gradeData.concat(parsedJson);
+                        validFilesCount++;
+                        totalNewRecords += parsedJson.length;
+                    } else {
+                        console.warn(`File "${file.name}" skipped: Not a valid JSON array structure.`);
+                    }
+                } catch (error) {
+                    console.error(`Error parsing file ${file.name}:`, error);
+                }
+            }
+
+            statusDiv.innerHTML = `<span class="success">Successfully appended ${validFilesCount} file(s). Total database size: ${gradeData.length} records. Ready to search!</span>`;
+            fileInput.value = ''; // Reset the input element UI
+        }
 
         function searchGrades() {
             const fName = document.getElementById('firstName').value.trim().toLowerCase();
             const lName = document.getElementById('lastName').value.trim().toLowerCase();
             const resultsDiv = document.getElementById('results');
             
-            resultsDiv.innerHTML = ''; // Clear previous results
+            resultsDiv.innerHTML = ''; 
 
-            if (!fName || !lName) {
-                resultsDiv.innerHTML = '<p class="error">Please enter both First and Last Name.</p>';
+            if (gradeData.length === 0) {
+                alert("Please load your JSON grade files first!");
                 return;
             }
 
-            // Filter the data for a match
+            if (!fName || !lName) {
+                resultsDiv.innerHTML = '<p class="error"><b>Please enter both First and Last Name.</b></p>';
+                return;
+            }
+
+            // Filter across the dynamically merged array
             const studentGrades = gradeData.filter(student => 
-                student.firstName.toLowerCase() === fName && 
-                student.lastName.toLowerCase() === lName
+                student.firstName.trim().toLowerCase() === fName && 
+                student.lastName.trim().toLowerCase() === lName
             );
 
             if (studentGrades.length === 0) {
-                resultsDiv.innerHTML = '<p>No grades found for this student. Please check the spelling.</p>';
+                resultsDiv.innerHTML = '<p>No matching grades found for this student name in the current batch.</p>';
                 return;
             }
 
-            // Display the results
+            // Render matching records
             studentGrades.forEach(record => {
                 const card = document.createElement('div');
                 card.className = 'result-card';
                 card.innerHTML = `
-                    <p><strong>Subject:</strong> ${record.subjectCode} - ${record.subjectTitle}</p>
-                    <p><strong>Teacher:</strong> ${record.teacher}</p>
-                    <p><strong>Final Grade:</strong> <span style="font-size: 1.2em; font-weight: bold; color: #d9534f;">${record.grade}</span></p>
+                    <p><strong>Subject Code:</strong> ${record.subjectCode || 'N/A'}</p>
+                    <p><strong>Subject Title:</strong> ${record.subjectTitle || 'N/A'}</p>
+                    <p><strong>Teacher:</strong> ${record.teacher || 'N/A'}</p>
+                    <p><strong>Grade:</strong> <span style="font-size: 1.1em; font-weight: bold; color: #0056b3;">${record.grade || 'N/A'}</span></p>
                 `;
                 resultsDiv.appendChild(card);
             });
+        }
+
+        function clearDatabase() {
+            gradeData = [];
+            document.getElementById('fileInput').value = '';
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('status').innerText = "Database cleared. No data loaded.";
         }
     </script>
 
