@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Grade Portal</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
+        .search-box { margin-bottom: 20px; padding: 15px; background: #f4f4f4; border-radius: 5px; }
+        input { padding: 10px; width: calc(50% - 15px); margin-bottom: 10px; }
+        button { padding: 10px 20px; background: #0056b3; color: white; border: none; cursor: pointer; border-radius: 3px; }
+        button:hover { background: #004494; }
+        .result-card { border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #0056b3; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2>Student Grade Search</h2>
+    
+    <div class="search-box">
+        <input type="text" id="firstName" placeholder="First Name (e.g., Juan)">
+        <input type="text" id="lastName" placeholder="Last Name (e.g., Dela Cruz)">
+        <button onclick="searchGrades()">View Grades</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        // We will store the data here once it loads
+        let gradeData = [];
+
+        // Fetch the JSON file when the page loads
+        fetch('grades.json')
+            .then(response => response.json())
+            .then(data => {
+                gradeData = data;
+            })
+            .catch(error => {
+                console.error('Error loading grades:', error);
+                document.getElementById('results').innerHTML = '<p class="error">System Error: Could not load grade database.</p>';
+            });
+
+        function searchGrades() {
+            const fName = document.getElementById('firstName').value.trim().toLowerCase();
+            const lName = document.getElementById('lastName').value.trim().toLowerCase();
+            const resultsDiv = document.getElementById('results');
+            
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (!fName || !lName) {
+                resultsDiv.innerHTML = '<p class="error">Please enter both First and Last Name.</p>';
+                return;
+            }
+
+            // Filter the data for a match
+            const studentGrades = gradeData.filter(student => 
+                student.firstName.toLowerCase() === fName && 
+                student.lastName.toLowerCase() === lName
+            );
+
+            if (studentGrades.length === 0) {
+                resultsDiv.innerHTML = '<p>No grades found for this student. Please check the spelling.</p>';
+                return;
+            }
+
+            // Display the results
+            studentGrades.forEach(record => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.innerHTML = `
+                    <p><strong>Subject:</strong> ${record.subjectCode} - ${record.subjectTitle}</p>
+                    <p><strong>Teacher:</strong> ${record.teacher}</p>
+                    <p><strong>Final Grade:</strong> <span style="font-size: 1.2em; font-weight: bold; color: #d9534f;">${record.grade}</span></p>
+                `;
+                resultsDiv.appendChild(card);
+            });
+        }
+    </script>
+
+</body>
+</html>
