@@ -54,7 +54,7 @@
 
         function processPastedData() {
             const textArea = document.getElementById('pasteArea');
-            const rawText = textArea.value.trim();
+            let rawText = textArea.value.trim();
             const statusDiv = document.getElementById('status');
             const countBadge = document.getElementById('memoryCount');
 
@@ -64,6 +64,12 @@
             }
 
             let addedCount = 0;
+
+            // --- GLOBAL UN-SQUASHER ---
+            // Fixes issues where the copy-paste glues a grade directly into the next student's name on the same line.
+            // Example: "1.5 AVILLA,RAJIEMAE" or "1.75 B+CORTES" -> Forces a clean line break before the name.
+            rawText = rawText.replace(/([1-5](?:\.\d{1,2})?|INC|DRP|IC)\s*([A-F][\+\-]?|INC|DRP|IC)\s*(?=[A-ZÑ])/g, "$1 $2\n");
+
             const rawLines = rawText.split('\n');
 
             let subjectCode = "N/A";
@@ -93,7 +99,7 @@
                 line = line.trim();
                 if (!line) return;
 
-                // --- EXCEL FORMAT ---
+                // --- EXCEL FORMAT DETECTION ---
                 if (line.includes('\t')) {
                     const cols = line.split('\t').map(c => c.trim()).filter(c => c !== '');
                     if (cols.length < 4) return; 
@@ -117,11 +123,8 @@
                     return; 
                 }
 
-                // --- PDF FORMAT ---
+                // --- PDF FORMAT DETECTION ---
                 if (line.includes(',')) {
-                    // Fix merged grades at the very end of the line (e.g. "1.50A" -> "1.50 A")
-                    line = line.replace(/([1-5](?:\.\d{1,2})?|INC|DRP|IC)([A-F][\+\-]?|INC|DRP|IC)$/i, "$1 $2");
-
                     // Match Name at start (Last, First)
                     const nameMatch = line.match(/^([A-Za-zÑñÃ\-\.\'‘ ]+,\s*[A-Za-zÑñÃ\-\.\'‘ ]+)/);
                     // Match Grades at end (Numeric Letter)
