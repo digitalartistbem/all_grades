@@ -29,7 +29,7 @@
     
     <div class="section">
         <h3>Step 1: Paste Data</h3>
-        <p style="font-size: 13px; margin-top: -5px;">Copy rows directly from Excel (5 columns) <br><b>OR</b> paste raw text directly from the ACLC Gradesheet PDF.</p>
+        <p style="font-size: 13px; margin-top: -5px;">Copy rows directly from Excel (5 columns) <br><b>OR</b> paste raw, messy text directly from the PDF.</p>
         
         <textarea id="pasteArea" placeholder="Paste Excel rows here... OR paste the raw text from your PDF Gradesheet directly..."></textarea>
         
@@ -53,7 +53,7 @@
 
         function processPastedData() {
             const textArea = document.getElementById('pasteArea');
-            const rawText = textArea.value.trim();
+            let rawText = textArea.value.trim();
             const statusDiv = document.getElementById('status');
 
             if (!rawText) {
@@ -63,6 +63,9 @@
 
             let addedCount = 0;
             let errorCount = 0;
+
+            // Pre-cleaning: Fix merged grades/names like "1.50 AAUGUSTO" -> "1.50 A AUGUSTO"
+            rawText = rawText.replace(/([1-5](?:\.\d{1,2})?)\s*([A-F][\+\-]?|INC|DRP)([A-ZÑ])/g, "$1 $2 $3");
 
             // DETECT FORMAT: If it contains tabs, treat it as standard Excel Paste
             if (rawText.includes('\t')) {
@@ -83,50 +86,64 @@
                         addedCount++;
                     } else {
                         errorCount++;
-                        console.warn(`Row ${index + 1} skipped. Not enough columns.`, columns);
                     }
                 });
 
             } else {
                 // PDF PLAIN TEXT PARSER
-                // 1. Extract metadata (Headers) from the PDF text
                 let subjectCode = "N/A";
                 let subjectTitle = "N/A";
                 let teacher = "N/A";
 
-                const codeMatch = rawText.match(/Subject Code\s+(?:Section\s+)?(\S+)/i);
-                if (codeMatch) subjectCode = codeMatch[1].trim();
+                // 1. Extract Headers Adaptively
+                const codeMatch = rawText.match(/(?:Subject Code\s+)?([A-Z0-9\-]+)?\s*Section\s+([A-Z0-9\-]+)/i);
+                if (codeMatch) {
+                    let codePart = codeMatch[1] ? codeMatch[1].trim() + " " : "";
+                    subjectCode = codePart + "(" + codeMatch[2].trim() + ")";
+                }
 
-                const titleMatch = rawText.match(/Subject Title\s+(.+?)(?:\s+Day|\n|$)/i);
-                if (titleMatch) subjectTitle = titleMatch[1].trim();
+                const titleMatch = rawText.match(/(?:Subject Title\s+)?(.+?)\s+Day\s+[A-Za-z]/i);
+                if (titleMatch) {
+                    subjectTitle = titleMatch[1].trim();
+                }
 
                 const teacherMatch = rawText.match(/Instructor\s+(.+?)(?:\s+\||Room|\n|$)/i);
-                if (teacherMatch) teacher = teacherMatch[1].trim();
+                if (teacherMatch) {
+                    teacher = teacherMatch[1].trim();
+                } else {
+                    // Fallback if "Instructor" is missing (e.g., WINSLIE P. DADA | 24-512 Room SCLAB)
+                    const teacherFallback = rawText.match(/([A-Z\.\sÑñ]+)\s+\|\s+.*?Room/i);
+                    if (teacherFallback) teacher = teacherFallback[1].trim();
+                }
 
-                // 2. Extract students using Regex
-                // Matches: [Last Name, First Name] [LEC] [Status] [6 sequential grades] [Letter Grade]
-                // The \s* before the letter grade handles merged copy-pastes like "1.50 ACASUPANAN"
-                const studentRegex = /([A-Za-zÑñ\-\. ]+,\s*[A-Za-zÑñ\-\. ]+?)\s+(\d{1,3})\s+([A-Za-z]{2,})\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s*([A-F][\+\-]?)/g;
+                // 2. Extract Students robustly
+                // Rules: Last Name, First Name (No numbers allowed) -> Sequence of middle grades/status -> Final Numeric Grade -> Final Letter Grade
+                const studentRegex = /([^0-9,\n]{2,40}?,\s*[^0-9\n]{2,40}?)\s+((?:[\d\.]+\s*[a-zA-Z]*\s*)+)\s+([1-5](?:\.\d{1,2})?)\s+([A-F][\+\-]?|INC|DRP)/g;
 
                 let match;
                 let foundAny = false;
 
-                // Loop through all regex matches found in the block of text
                 while ((match = studentRegex.exec(rawText)) !== null) {
                     foundAny = true;
                     
-                    const studentName = match[1].trim().replace(/\s+/g, ' '); // Clean up weird spacing
-                    const finalNumericGrade = match[9]; // The 9th group is the Final Grade (e.g., 1.25)
-                    const letterGrade = match[10];      // The 10th group is the Letter (e.g., A, C+)
+                    let studentName = match[1].trim().replace(/\s+/g, ' '); 
+                    
+                    // Filter out header words that accidentally bleed in
+                    studentName = studentName.replace(/GRADE|FINALGRD|STUDENT|NAME|LEC|LAB|Status|TotStud/gi, '').trim();
 
-                    gradeData.push({
-                        studentName: studentName,
-                        subjectCode: subjectCode,
-                        subjectTitle: subjectTitle,
-                        teacher: teacher,
-                        grade: `${finalNumericGrade} (${letterGrade})` // Merges to format: 1.25 (A)
-                    });
-                    addedCount++;
+                    const finalNumericGrade = match[3]; 
+                    const letterGrade = match[4];      
+
+                    if (studentName.length > 2) {
+                        gradeData.push({
+                            studentName: studentName,
+                            subjectCode: subjectCode,
+                            subjectTitle: subjectTitle,
+                            teacher: teacher,
+                            grade: `${finalNumericGrade} (${letterGrade})` 
+                        });
+                        addedCount++;
+                    }
                 }
 
                 if (!foundAny) {
@@ -139,10 +156,10 @@
             if (addedCount > 0) {
                 let msg = `<span class="success">Success! Added ${addedCount} new student records. Total in memory: ${gradeData.length}.</span>`;
                 if (errorCount > 0) {
-                    msg += `<br><span class="error" style="font-size: 12px;">Note: Skipped ${errorCount} invalid rows.</span>`;
+                    msg += `<br><span class="error" style="font-size: 12px;">Note: Skipped ${errorCount} invalid Excel rows.</span>`;
                 }
                 statusDiv.innerHTML = msg;
-                textArea.value = ''; // Clear the box for the next paste
+                textArea.value = ''; // Clear the box
             } else {
                 statusDiv.innerHTML = '<span class="error">Failed to load data. Ensure the format is correct.</span>';
             }
