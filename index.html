@@ -28,10 +28,10 @@
     <h2>Grade Release Dashboard</h2>
     
     <div class="section">
-        <h3>Step 1: Paste Excel Data</h3>
-        <p style="font-size: 13px; margin-top: -5px;">Copy rows directly from Excel. Columns MUST be:<br><b>Name | Subj Code | Subj Title | Teacher | Grade</b></p>
+        <h3>Step 1: Paste Data</h3>
+        <p style="font-size: 13px; margin-top: -5px;">Copy rows directly from Excel (5 columns) <br><b>OR</b> paste raw text directly from the ACLC Gradesheet PDF.</p>
         
-        <textarea id="pasteArea" placeholder="Juan Dela Cruz    IT101    Linux Admin    Sir Ricky    1.5"></textarea>
+        <textarea id="pasteArea" placeholder="Paste Excel rows here... OR paste the raw text from your PDF Gradesheet directly..."></textarea>
         
         <button class="btn-secondary" onclick="processPastedData()">Load Pasted Data</button>
         <button class="btn-danger" onclick="clearDatabase()">Clear System Memory</button>
@@ -61,44 +61,90 @@
                 return;
             }
 
-            // Split the text into individual rows
-            const rows = rawText.split('\n');
             let addedCount = 0;
             let errorCount = 0;
 
-            rows.forEach((row, index) => {
-                // Skip completely blank lines
-                if (row.trim() === '') return;
+            // DETECT FORMAT: If it contains tabs, treat it as standard Excel Paste
+            if (rawText.includes('\t')) {
+                const rows = rawText.split('\n');
+                
+                rows.forEach((row, index) => {
+                    if (row.trim() === '') return;
+                    const columns = row.split('\t').map(col => col.trim());
 
-                // Excel data relies on tabs to separate columns (\t)
-                const columns = row.split('\t').map(col => col.trim());
+                    if (columns.length >= 5) {
+                        gradeData.push({
+                            studentName: columns[0],
+                            subjectCode: columns[1],
+                            subjectTitle: columns[2],
+                            teacher: columns[3],
+                            grade: columns[4]
+                        });
+                        addedCount++;
+                    } else {
+                        errorCount++;
+                        console.warn(`Row ${index + 1} skipped. Not enough columns.`, columns);
+                    }
+                });
 
-                // Check if the row has exactly or more than our 5 required columns
-                if (columns.length >= 5) {
+            } else {
+                // PDF PLAIN TEXT PARSER
+                // 1. Extract metadata (Headers) from the PDF text
+                let subjectCode = "N/A";
+                let subjectTitle = "N/A";
+                let teacher = "N/A";
+
+                const codeMatch = rawText.match(/Subject Code\s+(?:Section\s+)?(\S+)/i);
+                if (codeMatch) subjectCode = codeMatch[1].trim();
+
+                const titleMatch = rawText.match(/Subject Title\s+(.+?)(?:\s+Day|\n|$)/i);
+                if (titleMatch) subjectTitle = titleMatch[1].trim();
+
+                const teacherMatch = rawText.match(/Instructor\s+(.+?)(?:\s+\||Room|\n|$)/i);
+                if (teacherMatch) teacher = teacherMatch[1].trim();
+
+                // 2. Extract students using Regex
+                // Matches: [Last Name, First Name] [LEC] [Status] [6 sequential grades] [Letter Grade]
+                // The \s* before the letter grade handles merged copy-pastes like "1.50 ACASUPANAN"
+                const studentRegex = /([A-Za-zÑñ\-\. ]+,\s*[A-Za-zÑñ\-\. ]+?)\s+(\d{1,3})\s+([A-Za-z]{2,})\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s*([A-F][\+\-]?)/g;
+
+                let match;
+                let foundAny = false;
+
+                // Loop through all regex matches found in the block of text
+                while ((match = studentRegex.exec(rawText)) !== null) {
+                    foundAny = true;
+                    
+                    const studentName = match[1].trim().replace(/\s+/g, ' '); // Clean up weird spacing
+                    const finalNumericGrade = match[9]; // The 9th group is the Final Grade (e.g., 1.25)
+                    const letterGrade = match[10];      // The 10th group is the Letter (e.g., A, C+)
+
                     gradeData.push({
-                        studentName: columns[0],
-                        subjectCode: columns[1],
-                        subjectTitle: columns[2],
-                        teacher: columns[3],
-                        grade: columns[4]
+                        studentName: studentName,
+                        subjectCode: subjectCode,
+                        subjectTitle: subjectTitle,
+                        teacher: teacher,
+                        grade: `${finalNumericGrade} (${letterGrade})` // Merges to format: 1.25 (A)
                     });
                     addedCount++;
-                } else {
-                    errorCount++;
-                    console.warn(`Row ${index + 1} skipped. It did not have 5 distinct columns. Data seen:`, columns);
                 }
-            });
+
+                if (!foundAny) {
+                     statusDiv.innerHTML = '<span class="error">Failed to load. Could not detect valid student rows or headers from the text.</span>';
+                     return;
+                }
+            }
 
             // Provide user feedback
             if (addedCount > 0) {
                 let msg = `<span class="success">Success! Added ${addedCount} new student records. Total in memory: ${gradeData.length}.</span>`;
                 if (errorCount > 0) {
-                    msg += `<br><span class="error" style="font-size: 12px;">Note: Skipped ${errorCount} invalid rows. Make sure you aren't copying empty spaces or headers.</span>`;
+                    msg += `<br><span class="error" style="font-size: 12px;">Note: Skipped ${errorCount} invalid rows.</span>`;
                 }
                 statusDiv.innerHTML = msg;
                 textArea.value = ''; // Clear the box for the next paste
             } else {
-                statusDiv.innerHTML = '<span class="error">Failed to load. Ensure you are copying 5 distinct columns from Excel.</span>';
+                statusDiv.innerHTML = '<span class="error">Failed to load data. Ensure the format is correct.</span>';
             }
         }
 
